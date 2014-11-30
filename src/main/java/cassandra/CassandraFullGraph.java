@@ -28,8 +28,10 @@ public class CassandraFullGraph implements PerformanceTest{
 	private Cluster cluster;
 	private Session session;
 	private String addr;
-	
-	public void connect(){
+    private int pid;
+
+
+    public void connect(){
 		InetSocketAddress server = new InetSocketAddress(this.addr, 9042);
 		ArrayList<InetSocketAddress> servers = new ArrayList<InetSocketAddress>();
 		servers.add(server);
@@ -66,49 +68,48 @@ public class CassandraFullGraph implements PerformanceTest{
 	public Session getSession(){
 		return this.session;
 	}
-	
-	public CassandraFullGraph(String server) {
-		this.addr = server;
-		this.connect();
-	}
+
+    public CassandraFullGraph(String server, int pid) {
+        this.addr = server;
+        this.pid = pid;
+        this.connect();
+    }
 	
 	public void close(){
 		cluster.close();
 	}
 	
 	public void load(int writes) throws IOException{
-		
-		Random r = new Random(System.currentTimeMillis());
-					
-		int[] vset = new int[writes];
-		for (int i = 0; i < writes; i++){
-			vset[i] = i;
-		}
-			
-		for (int i = 0; i < writes; i++){
-			int srcV = vset[i];
-			for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
-				
-				int dstV = vset[Math.abs(r.nextInt()) % writes];
 
-				Map<String, Long> edgeAttrs = new HashMap<String, Long>();
-				edgeAttrs.put("ts_start", System.nanoTime());
-				edgeAttrs.put("ts_end", System.nanoTime());
+        Random r = new Random(System.currentTimeMillis());
 
-				int edgeType = Math.abs(r.nextInt()) % 2;
-				Statement state = QueryBuilder.insertInto("importPerf", "mg")
-						.value("gid", srcV)
-						.value("edgeType", edgeType+1)
-						.value("dstid", dstV)
-						.value("edgeAttrs", edgeAttrs);
-				//getSession().executeAsync(userState);
-				getSession().execute(state);
-			}
-		}
+        int[] vset = new int[writes];
+        for (int i = 0; i < writes; i++){
+            vset[i] = this.pid * writes + i;
+        }
+
+        Map<String, Long> edgeAttrs = new HashMap<String, Long>();
+        edgeAttrs.put("ts_start", System.nanoTime());
+        edgeAttrs.put("ts_end", System.nanoTime());
+
+        for (int i = 0; i < writes; i++){
+            int srcV = vset[i];
+            for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
+
+                int dstV = vset[Math.abs(r.nextInt()) % writes];
+
+                int edgeType = Math.abs(r.nextInt()) % 20;
+                Statement state = QueryBuilder.insertInto("importPerf", "mg")
+                        .value("gid", srcV)
+                        .value("edgeType", edgeType+1)
+                        .value("dstid", dstV)
+                        .value("edgeAttrs", edgeAttrs);
+                //getSession().executeAsync(userState);
+                getSession().execute(state);
+            }
+        }
 	}
-	
-	
-	
+
 	public void run() throws IOException{
 		try{
 			this.load(1000);
@@ -122,15 +123,19 @@ public class CassandraFullGraph implements PerformanceTest{
 	}
 	
 	public static void main(String[] args) throws IOException, InterruptedException{
-		int id = Integer.parseInt(args[1]);
-		CassandraFullGraph t = new CassandraFullGraph("192.168.1.67");
-		try{
-			t.createSchema();
-		} catch (AlreadyExistsException aee){
-			System.out.println("schema exists");
-		}
-		long start = System.currentTimeMillis();
-		t.run();
+        int pid = Integer.parseInt(args[1]);
+        CassandraFullGraph t = new CassandraFullGraph(args[0], pid);
+	    /*
+	    try{
+		t.createSchema();
+	    } catch (AlreadyExistsException aee){
+		System.out.println("schema exists");
+	    }
+	    */
+        long start = System.currentTimeMillis();
+        t.run();
+        long end = System.currentTimeMillis();
+        System.out.println("Insert Time: " + (end - start) + " ms");
 		
 	}
 }
