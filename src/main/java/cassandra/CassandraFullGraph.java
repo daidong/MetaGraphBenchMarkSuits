@@ -7,11 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
-import com.datastax.driver.core.Cluster;
-import com.datastax.driver.core.Host;
-import com.datastax.driver.core.Metadata;
-import com.datastax.driver.core.Session;
-import com.datastax.driver.core.Statement;
+import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.thinkaurelius.titan.util.system.Threads;
@@ -23,7 +19,7 @@ import utils.PerformanceTest;
 import workloads.GraphWorkLoad;
 import workloads.MetaEdge;
 
-public class CassandraFullGraph implements PerformanceTest{
+public class CassandraFullGraph{
 	
 	private Cluster cluster;
 	private Session session;
@@ -110,9 +106,80 @@ public class CassandraFullGraph implements PerformanceTest{
         }
 	}
 
-	public void run() throws IOException{
+    public void asyncload(int writes) throws IOException{
+
+        Random r = new Random(System.currentTimeMillis());
+
+        int[] vset = new int[writes];
+        for (int i = 0; i < writes; i++){
+            vset[i] = this.pid * writes + i;
+        }
+
+        Map<String, Long> edgeAttrs = new HashMap<String, Long>();
+        edgeAttrs.put("ts_start", System.nanoTime());
+        edgeAttrs.put("ts_end", System.nanoTime());
+
+        ResultSetFuture p = null;
+        for (int i = 0; i < writes; i++){
+            int srcV = vset[i];
+            for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
+
+                int dstV = vset[Math.abs(r.nextInt()) % writes];
+
+                int edgeType = Math.abs(r.nextInt()) % 20;
+                Statement state = QueryBuilder.insertInto("importPerf", "mg")
+                        .value("gid", srcV)
+                        .value("edgeType", edgeType+1)
+                        .value("dstid", dstV)
+                        .value("edgeAttrs", edgeAttrs);
+                p = getSession().executeAsync(state);
+                //getSession().execute(state);
+            }
+        }
+
+    }
+
+    public void batchload(int writes) throws IOException{
+
+        Random r = new Random(System.currentTimeMillis());
+
+        int[] vset = new int[writes];
+        for (int i = 0; i < writes; i++){
+            vset[i] = this.pid * writes + i;
+        }
+
+        Map<String, Long> edgeAttrs = new HashMap<String, Long>();
+        edgeAttrs.put("ts_start", System.nanoTime());
+        edgeAttrs.put("ts_end", System.nanoTime());
+
+        final BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        for (int i = 0; i < writes; i++){
+            int srcV = vset[i];
+            for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
+
+                int dstV = vset[Math.abs(r.nextInt()) % writes];
+
+                int edgeType = Math.abs(r.nextInt()) % 20;
+                Statement state = QueryBuilder.insertInto("importPerf", "mg")
+                        .value("gid", srcV)
+                        .value("edgeType", edgeType+1)
+                        .value("dstid", dstV)
+                        .value("edgeAttrs", edgeAttrs);
+                batch.add(state);
+                //getSession().execute(state);
+            }
+        }
+        getSession().execute(batch);
+    }
+
+	public void run(int type) throws IOException{
 		try{
-			this.load(1000);
+            if (type == 1)
+			    this.load(1000);
+            else if (type == 2)
+                this.asyncload(1000);
+            else if (type == 3)
+                this.batchload(1000);
 		} finally {
 			this.close();
 		}
@@ -124,6 +191,7 @@ public class CassandraFullGraph implements PerformanceTest{
 	
 	public static void main(String[] args) throws IOException, InterruptedException{
         int pid = Integer.parseInt(args[1]);
+        int insertType = Integer.parseInt(args[2]);
         CassandraFullGraph t = new CassandraFullGraph(args[0], pid);
 	    /*
 	    try{
@@ -133,7 +201,7 @@ public class CassandraFullGraph implements PerformanceTest{
 	    }
 	    */
         long start = System.currentTimeMillis();
-        t.run();
+        t.run(insertType);
         long end = System.currentTimeMillis();
         System.out.println("Insert Time: " + (end - start) + " ms");
 		
