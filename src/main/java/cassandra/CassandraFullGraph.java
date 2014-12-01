@@ -14,6 +14,8 @@ import com.thinkaurelius.titan.util.system.Threads;
 import com.tinkerpop.blueprints.Edge;
 import com.tinkerpop.blueprints.Vertex;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.sstable.CQLSSTableWriter;
 import utils.Constants;
 import utils.PerformanceTest;
 import workloads.GraphWorkLoad;
@@ -152,7 +154,8 @@ public class CassandraFullGraph{
         edgeAttrs.put("ts_start", System.nanoTime());
         edgeAttrs.put("ts_end", System.nanoTime());
 
-        final BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        //final BatchStatement batch = new BatchStatement(BatchStatement.Type.UNLOGGED);
+        final BatchStatement batch = new BatchStatement(BatchStatement.Type.LOGGED);
         for (int i = 0; i < writes; i++){
             int srcV = vset[i];
             for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
@@ -172,7 +175,45 @@ public class CassandraFullGraph{
         getSession().execute(batch);
     }
 
-	public void run(int type) throws IOException{
+    public void bulkload(int writes) throws IOException, InvalidRequestException {
+
+        String schema = "create table importPerf.mg ("
+                + "gid varint, "
+                + "edgeType varint,"
+                + "dstid varint,"
+                + "edgeAttrs map<text, bigint>,"
+                + "PRIMARY KEY (gid, edgeType, dstid));";
+
+        String insert = "INSERT INTO importPerf.mg (gid, edgeType, dstid, edgeAttrs) VALUES (?, ?, ?, ?)";
+
+        CQLSSTableWriter writer = CQLSSTableWriter.builder().inDirectory("/tmp/writesstable")
+                .forTable(schema).using(insert).build();
+
+        Random r = new Random(System.currentTimeMillis());
+
+        int[] vset = new int[writes];
+        for (int i = 0; i < writes; i++){
+            vset[i] = this.pid * writes + i;
+        }
+
+        Map<String, Long> edgeAttrs = new HashMap<String, Long>();
+        edgeAttrs.put("ts_start", System.nanoTime());
+        edgeAttrs.put("ts_end", System.nanoTime());
+
+        for (int i = 0; i < writes; i++){
+            int srcV = vset[i];
+            for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
+
+                int dstV = vset[Math.abs(r.nextInt()) % writes];
+
+                int edgeType = Math.abs(r.nextInt()) % 20;
+                writer.addRow(srcV, edgeType + 1, dstV, edgeAttrs);
+            }
+        }
+        writer.close();
+    }
+
+	public void run(int type) throws IOException, InvalidRequestException {
 		try{
             if (type == 1)
 			    this.load(1000);
@@ -180,6 +221,8 @@ public class CassandraFullGraph{
                 this.asyncload(1000);
             else if (type == 3)
                 this.batchload(1000);
+            else if (type == 4)
+                this.bulkload(1000);
 		} finally {
 			this.close();
 		}
@@ -189,7 +232,7 @@ public class CassandraFullGraph{
 		return "CassandraTest";
 	}
 	
-	public static void main(String[] args) throws IOException, InterruptedException{
+	public static void main(String[] args) throws IOException, InterruptedException, InvalidRequestException {
         int pid = Integer.parseInt(args[1]);
         int insertType = Integer.parseInt(args[2]);
         CassandraFullGraph t = new CassandraFullGraph(args[0], pid);
