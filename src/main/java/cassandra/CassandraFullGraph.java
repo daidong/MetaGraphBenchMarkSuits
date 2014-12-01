@@ -2,10 +2,7 @@ package cassandra;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.exceptions.AlreadyExistsException;
@@ -121,7 +118,7 @@ public class CassandraFullGraph{
         edgeAttrs.put("ts_start", System.nanoTime());
         edgeAttrs.put("ts_end", System.nanoTime());
 
-        ResultSetFuture p = null;
+        List<ResultSetFuture> futures = new ArrayList<ResultSetFuture>();
         for (int i = 0; i < writes; i++){
             int srcV = vset[i];
             for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
@@ -134,9 +131,14 @@ public class CassandraFullGraph{
                         .value("edgeType", edgeType+1)
                         .value("dstid", dstV)
                         .value("edgeAttrs", edgeAttrs);
-                p = getSession().executeAsync(state);
+                ResultSetFuture p = getSession().executeAsync(state);
+                futures.add(p);
                 //getSession().execute(state);
             }
+        }
+
+        for (ResultSetFuture f : futures){
+            f.getUninterruptibly();
         }
 
     }
@@ -175,45 +177,7 @@ public class CassandraFullGraph{
         getSession().execute(batch);
     }
 
-    public void bulkload(int writes) throws IOException, InvalidRequestException {
-
-        String schema = "create table importPerf.mg ("
-                + "gid varint, "
-                + "edgeType varint,"
-                + "dstid varint,"
-                + "edgeAttrs map<text, bigint>,"
-                + "PRIMARY KEY (gid, edgeType, dstid));";
-
-        String insert = "INSERT INTO importPerf.mg (gid, edgeType, dstid, edgeAttrs) VALUES (?, ?, ?, ?)";
-
-        CQLSSTableWriter writer = CQLSSTableWriter.builder().inDirectory("/tmp/writesstable")
-                .forTable(schema).using(insert).build();
-
-        Random r = new Random(System.currentTimeMillis());
-
-        int[] vset = new int[writes];
-        for (int i = 0; i < writes; i++){
-            vset[i] = this.pid * writes + i;
-        }
-
-        Map<String, Long> edgeAttrs = new HashMap<String, Long>();
-        edgeAttrs.put("ts_start", System.nanoTime());
-        edgeAttrs.put("ts_end", System.nanoTime());
-
-        for (int i = 0; i < writes; i++){
-            int srcV = vset[i];
-            for (int j = 0; j < Math.abs(r.nextInt()) % 20; j++){
-
-                int dstV = vset[Math.abs(r.nextInt()) % writes];
-
-                int edgeType = Math.abs(r.nextInt()) % 20;
-                writer.addRow(srcV, edgeType + 1, dstV, edgeAttrs);
-            }
-        }
-        writer.close();
-    }
-
-	public void run(int type) throws IOException, InvalidRequestException {
+    public void run(int type) throws IOException, InvalidRequestException {
 		try{
             if (type == 1)
 			    this.load(1000);
@@ -221,8 +185,6 @@ public class CassandraFullGraph{
                 this.asyncload(1000);
             else if (type == 3)
                 this.batchload(1000);
-            else if (type == 4)
-                this.bulkload(1000);
 		} finally {
 			this.close();
 		}
@@ -246,7 +208,7 @@ public class CassandraFullGraph{
         long start = System.currentTimeMillis();
         t.run(insertType);
         long end = System.currentTimeMillis();
-        System.out.println("Insert Time: " + (end - start) + " ms");
+        System.out.println("Insert Time: " + (end - start) + " ms from " + args[0] + " pid");
 		
 	}
 }
